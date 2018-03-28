@@ -1,0 +1,335 @@
+
+
+
+
+PARSER_BEGIN(Scrapit)
+
+package com.opedea.scrapit;
+
+import org.jsoup.Jsoup;
+import org.jsoup.nodes.Document;
+import org.jsoup.nodes.Element;
+
+import java.io.BufferedInputStream;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.net.MalformedURLException;
+import java.net.URL;
+import java.util.ArrayList;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+public class Scrapit {
+	static   ArrayList<Element> elements;
+
+public static void main(String args[]) throws ParseException {
+          Scrapit parser;
+          if (args.length == 0) {
+            parser = new Scrapit(System.in);
+          } else if (args.length == 1) {
+            try {
+              parser = new Scrapit(new java.io.FileInputStream(args[0]));
+            } catch (java.io.FileNotFoundException e) {
+              System.out.println(e);
+              System.out.println("Scrapit:  File " + args[0] + " not found.");
+              return;
+            }
+          } else {
+            System.out.println("Scrapit:  Usage is one of:");
+            System.out.println("         java scrapit < inputfile");
+            System.out.println("OR");
+            System.out.println("         java scrapit inputfile");
+            return;
+          }
+          try {
+            parser.start();
+          } catch (ParseException e) {
+            System.out.println(e.getMessage());
+            System.out.println("Scrapit:  Encountered errors during parse.");
+          }
+        }
+
+               public static void loadElements(String selector,String from){
+          try {
+            Document doc = Jsoup.connect(from).get();
+            elements.addAll(doc.select(selector));
+          } catch (IOException e) {
+            throw new RuntimeException(e);
+          }
+
+        }
+
+       private static final String attrPattern = "\\$attr\\[\\'(.)*\\'\\]";
+  private static final Pattern p = Pattern.compile(attrPattern);
+  public static void print(String format,MapObj map){
+    performAction(new ElementAction() {
+        @Override
+        public void doAction(Element element, int index) {
+      System.out.println(format(format,element,index));
+
+        }
+      },map);
+  }
+  public static class MapObj{
+    Token left,condition,right;
+       public MapObj(Token left, Token condition, Token right) {
+
+      this.left = left;
+      this.condition = condition;
+      this.right = right;
+    }
+  }
+  public static String format(String format,Element element,int index){
+ 		String formatted = format
+              .replace("$text",element.text())
+              .replace("$html",element.html())
+              .replace("$element",element.outerHtml())
+              .replace("$id",element.id())
+              .replace("$tag",element.tagName())
+              .replace("$class",element.className())
+              .replace("$index",String.valueOf(index));
+      Matcher match = p.matcher(formatted);
+      while (match.find()){
+        String result=match.group(0);
+        formatted=formatted.replace(result,element.attr(result.substring(7,result.length()-2)));
+      }
+
+      return formatted;
+  }
+  public static void load(String extractor,String filename,MapObj map){
+
+    performAction(new ElementAction() {
+        @Override
+        public void doAction(Element element, int index) {
+    	saveUrl(format(extractor,element,index),format(filename,element,index));
+
+        }
+      },map);
+
+  }
+ public static void save(String format,String filename,MapObj map){
+    final java.io.PrintWriter p;
+    try {
+       p = new java.io.PrintWriter(filename);
+    } catch (java.io.FileNotFoundException e) {
+      throw new RuntimeException(e);
+    }
+     performAction(new ElementAction() {
+        @Override
+        public void doAction(Element element, int index) {
+        	      p.println(format(format,element,index));
+
+        }
+      },map);
+    p.close();
+  }
+
+  public static void performAction(ElementAction action,MapObj map){
+  	for (int i=0;i<elements.size();i++) {
+    	Element element = elements.get(i);
+    	if(isMapped(map,element,i))
+    	action.doAction(element,i);
+    }
+  }
+  public interface ElementAction{
+  	public  void doAction(Element element, int index);
+  }
+public static boolean isMapped(MapObj map,Element element,int index){
+        if (map==null) return true;
+  String right = (format(map.right.toString(),element,index));
+  right=right.substring(1,right.length()-1);
+  String left = (format(map.left.toString(),element,index));
+  left=left.substring(1,left.length()-1);
+        switch (map.condition.kind){
+          case ScrapitConstants.EQUAL:return right.equals(left);
+          case ScrapitConstants.NOT_EQUAL:return !right.equals(left);
+          case ScrapitConstants.LIKE:
+
+
+            if(right.startsWith("%") && right.endsWith("%")){
+              return left.contains(right.substring(1,right.length()-1));
+            }
+            else if (right.startsWith("%")){
+              return left.endsWith(right.substring(1));
+            }
+            else if(right.endsWith("%")){
+              return left.startsWith(right.substring(0,right.length()-1));
+            }
+            else{
+              throw new RuntimeException("LIKE Condition Wildcard '%' should be at the START and/or END of the second string");
+            }
+
+            case ScrapitConstants.REGEX:
+              Pattern p = Pattern.compile(right);
+              return p.matcher(left).find();
+
+        }
+        return true;
+  }
+
+
+    public static void saveUrl( final String urlString,final String filename) {
+      try{
+    BufferedInputStream in = null;
+    FileOutputStream fout = null;
+    try {
+      in = new BufferedInputStream(new URL(urlString).openStream());
+      fout = new FileOutputStream(filename);
+
+      final byte data[] = new byte[1024];
+      int count;
+      while ((count = in.read(data, 0, 1024)) != -1) {
+        fout.write(data, 0, count);
+      }
+    } finally {
+      if (in != null) {
+        in.close();
+      }
+      if (fout != null) {
+        fout.close();
+      }
+    }
+      }
+      catch ( IOException e){
+        throw new RuntimeException(e);
+      }
+  }
+
+}
+PARSER_END(Scrapit)
+
+SKIP :
+{
+  " "
+| "\t"
+| "\n"
+| "\r"
+| <"#" (~["\n","\r"])* ("\n" | "\r" | "\r\n")>
+}
+
+TOKEN [IGNORE_CASE]: 
+{
+  <SELECT: "select">
+| <FROM: "from">
+| <SAVE: "save">
+| <PRINT: "print">
+| <LOAD: "load">
+| <MAP: "MAP">
+| <LIKE: "like">
+| <REGEX: "regex">
+
+}
+
+TOKEN :
+{
+< STRING_LITERAL:
+      "\""
+      (   (~["\"","\\","\n","\r"])
+        | ("\\"
+            ( ["n","t","b","r","f","\\","'","\""]
+            | ["0"-"7"] ( ["0"-"7"] )?
+            | ["0"-"3"] ["0"-"7"] ["0"-"7"]
+            | ["a"-"z","A"-"Z",".","*","[","]","(",")","^"]
+
+            )
+          )
+      )*
+      "\""
+  >
+| <SEMICOLON: ";">
+| <EQUAL: "==">
+| <NOT_EQUAL: "!=">
+}
+
+void start() :
+{}
+{
+(Statement())+ <EOF>
+}
+
+void Statement() :
+{}
+{
+	(SelectStatment() {}
+|
+Map()
+|
+	ActionStatment(null)
+	) Statement()
+|
+	<SEMICOLON>	
+
+}
+
+void Map() :
+{Token left,condition,right;}
+{
+	<MAP> left=<STRING_LITERAL> condition=Condition() right=<STRING_LITERAL> ActionStatment(new MapObj(left,condition,right))
+}
+
+Token Condition():
+{Token token;}
+{
+	 ( token=<EQUAL>
+	| token=<NOT_EQUAL>
+	| token=<REGEX>
+	| token=<LIKE>)
+	{return token;}
+}
+
+void SelectStatment() :
+{Token select;}
+{
+	{elements = new ArrayList<Element>();}
+	<SELECT> select=<STRING_LITERAL> FromStatement(select.toString().substring(1,select.toString().length()-1)) }
+void FromStatement(String selector) :
+{
+	Token from;
+}
+{
+	 <FROM> ((",")? from=<STRING_LITERAL> {loadElements(selector,from.toString().substring(1,from.toString().length()-1));} )* 
+}
+
+
+
+void ActionStatment(MapObj map) :
+{}
+{
+
+	SaveAction(map)
+	|
+	PrintAction(map)
+	|
+	LoadAction(map)
+}
+
+void SaveAction(MapObj map) :
+{Token format;
+Token filename;}
+{
+	<SAVE> format=<STRING_LITERAL> filename=<STRING_LITERAL> {save(format.toString().substring(1,format.toString().length()-1),filename.toString().substring(1,filename.toString().length()-1),map);}
+}
+
+void PrintAction(MapObj map) :
+{Token print;}
+{
+	<PRINT> print=<STRING_LITERAL> {print(print.toString().substring(1,print.toString().length()-1),map);}
+}
+
+void LoadAction(MapObj map) :
+{Token filename; Token extractor;}
+{
+	<LOAD> extractor=<STRING_LITERAL> filename=<STRING_LITERAL> {load(extractor.toString().substring(1,extractor.toString().length()-1),filename.toString().substring(1,filename.toString().length()-1),map);}
+}
+
+
+
+
+
+
+
+
+
+
+
+
